@@ -1,26 +1,24 @@
 #include <LiquidCrystal.h>
 
-// LCD pins
 LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
 
-// Motor pins
 #define MOTOR_EN  3
 #define MOTOR_IN1 6
 #define MOTOR_IN2 13
-
-// LED pins
 #define GREEN_LED 4
 #define RED_LED   5
-
-// Encoder pin
 #define ENCODER_PIN 2
 
-// RPM calculation
 volatile int pulseCount = 0;
 float rpm = 0;
+float maxRPM = 0;
+float targetRPM = 0;
 unsigned long lastTime = 0;
-bool faultCleared = false;
 unsigned long rampStartTime = 0;
+bool rampDone = false;
+bool faultActive = false;
+bool faultCleared = false;
+unsigned long faultStartTime = 0;
 
 void countPulse() {
   pulseCount++;
@@ -28,36 +26,29 @@ void countPulse() {
 
 void setup() {
   Serial.begin(9600);
-  
-  // LCD setup
+
   lcd.begin(16, 2);
   lcd.setCursor(0, 0);
   lcd.print("Firebird-1");
   lcd.setCursor(0, 1);
   lcd.print("System Ready");
   delay(1000);
-  
-  // Motor pins
+
   pinMode(MOTOR_EN,  OUTPUT);
   pinMode(MOTOR_IN1, OUTPUT);
   pinMode(MOTOR_IN2, OUTPUT);
-  
-  // LED pins
   pinMode(GREEN_LED, OUTPUT);
   pinMode(RED_LED,   OUTPUT);
-  
-  // Turn off both LEDs
+
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(RED_LED,   LOW);
-  
-  // Encoder
+
   pinMode(ENCODER_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, RISING);
 
-  // Set motor direction
   digitalWrite(MOTOR_IN1, HIGH);
   digitalWrite(MOTOR_IN2, LOW);
-  
+
   // 3 second countdown on LCD
   for (int i = 3; i > 0; i--) {
     lcd.clear();
@@ -70,74 +61,104 @@ void setup() {
     Serial.println(i);
     delay(1000);
   }
-  
+
   // Show ramping message
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Ramping up...");
   lcd.setCursor(0, 1);
-  lcd.print("Please wait...");
+  lcd.print("Speed: 0");
   Serial.println("Ramping up motor...");
-  
+
   // Slow ramp up over 2 seconds
+  // Show RPM during ramp on LCD
   for (int speed = 0; speed <= 255; speed += 5) {
     analogWrite(MOTOR_EN, speed);
+
+    // Calculate RPM during ramp
+    detachInterrupt(digitalPinToInterrupt(ENCODER_PIN));
+    float rampRPM = (pulseCount / 20.0) * 60.0;
+    pulseCount = 0;
+    attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, RISING);
+
+    // Show on LCD
+    lcd.setCursor(0, 1);
+    lcd.print("Speed:");
+    lcd.print(rampRPM);
+    lcd.print("    ");
+
+    if (rampRPM > maxRPM) maxRPM = rampRPM;
+
     delay(40);
   }
-  
+
+  // Target is 75% of max RPM seen
+  targetRPM = maxRPM * 0.75;
+
+  Serial.print("Max RPM during ramp: ");
+  Serial.println(maxRPM);
+  Serial.print("Target 75% RPM: ");
+  Serial.println(targetRPM);
+
   rampStartTime = millis();
   lastTime = millis();
 }
 
 void loop() {
   if (millis() - lastTime >= 1000) {
-    
-    // Stop counting while we calculate
+
     detachInterrupt(digitalPinToInterrupt(ENCODER_PIN));
-    
-    // Calculate RPM
     rpm = (pulseCount / 20.0) * 60.0;
     pulseCount = 0;
     lastTime = millis();
-    
-    // Print to serial monitor
+
     Serial.print("RPM: ");
     Serial.println(rpm);
-    
-    // Show RPM on LCD line 1
+
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("RPM: ");
+    lcd.print("RPM:");
     lcd.print(rpm);
-    
-    // Check speed and set LEDs
-    if (rpm >= 100) {
-      // Motor reached good speed
+
+    unsigned long elapsed = millis() - rampStartTime;
+
+    if (rpm >= targetRPM && targetRPM > 0) {
+      // SUCCESS
       digitalWrite(GREEN_LED, HIGH);
       digitalWrite(RED_LED, LOW);
+      faultActive = false;
       lcd.setCursor(0, 1);
       lcd.print("Status: GOOD!");
       Serial.println("Status: GOOD!");
-      
-    } else if (rpm < 100 && millis() - rampStartTime <= 7000) {
-      // Motor still trying - show red fault
+
+    } else if (elapsed <= 2000) {
+      // Still in ramp window
+      digitalWrite(RED_LED, LOW);
+      digitalWrite(GREEN_LED, LOW);
+      lcd.setCursor(0, 1);
+      lcd.print("Checking...");
+
+    } else if (elapsed > 2000 && elapsed <= 7000) {
+      // Fault window - trying for 5 more seconds
+      if (!faultActive) {
+        faultActive = true;
+        faultStartTime = millis();
+      }
       digitalWrite(RED_LED, HIGH);
       digitalWrite(GREEN_LED, LOW);
       lcd.setCursor(0, 1);
       lcd.print("FAULT:Low Speed!");
       Serial.println("FAULT: Low Speed!");
-      
-    } else if (rpm < 100 && millis() - rampStartTime > 7000) {
-      // Motor failed after 7 seconds total
+
+    } else if (elapsed > 7000) {
+      // Failed completely
       digitalWrite(RED_LED, HIGH);
       digitalWrite(GREEN_LED, LOW);
-      analogWrite(MOTOR_EN, 0);
       lcd.setCursor(0, 1);
       lcd.print("MOTOR FAILED!");
       Serial.println("MOTOR FAILED!");
     }
-    
-    // Restart counting
+
     attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, RISING);
   }
 }
