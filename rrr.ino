@@ -1,19 +1,10 @@
-// Milestone 1 - Motor Control + RPM Display
-#include <Wire.h>
-
-// Motor pins
 #define MOTOR_EN  9
 #define MOTOR_IN1 10
 #define MOTOR_IN2 11
-
-// Encoder pin
 #define ENCODER_PIN 2
-
-// LED pins
 #define GREEN_LED 4
 #define RED_LED   5
 
-// RPM calculation
 volatile int pulseCount = 0;
 float rpm = 0;
 unsigned long lastTime = 0;
@@ -25,26 +16,25 @@ void countPulse() {
 void setup() {
   Serial.begin(9600);
   
-  // Motor pins
   pinMode(MOTOR_EN,  OUTPUT);
   pinMode(MOTOR_IN1, OUTPUT);
   pinMode(MOTOR_IN2, OUTPUT);
-  
-  // LED pins
   pinMode(GREEN_LED, OUTPUT);
   pinMode(RED_LED,   OUTPUT);
   
-  // Encoder interrupt
+  // Use CHANGE instead of RISING to catch more pulses
   pinMode(ENCODER_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, RISING);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, CHANGE);
   
-  // Wait 3 seconds before starting
   Serial.println("Waiting 3 seconds...");
   digitalWrite(RED_LED, HIGH);
-  delay(3000);
+  delay(1000);
+  Serial.println("2...");
+  delay(1000);
+  Serial.println("1...");
+  delay(1000);
   digitalWrite(RED_LED, LOW);
   
-  // Start motor at full speed
   digitalWrite(MOTOR_IN1, HIGH);
   digitalWrite(MOTOR_IN2, LOW);
   analogWrite(MOTOR_EN, 255);
@@ -56,17 +46,26 @@ void setup() {
 }
 
 void loop() {
-  // Calculate RPM every second
   if (millis() - lastTime >= 1000) {
-    detachInterrupt(digitalPinToInterrupt(ENCODER_PIN));
     
-    rpm = (pulseCount / 20.0) * 60.0;
+    noInterrupts();
+    int count = pulseCount;
     pulseCount = 0;
+    interrupts();
+    
+    // Divide by 40 because CHANGE catches both edges
+    rpm = (count / 40.0) * 60.0;
     lastTime = millis();
     
     Serial.print("RPM: ");
     Serial.println(rpm);
     
-    attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, RISING);
+    if(rpm > 0) {
+      digitalWrite(GREEN_LED, HIGH);
+      digitalWrite(RED_LED, LOW);
+    } else {
+      digitalWrite(GREEN_LED, LOW);
+      digitalWrite(RED_LED, HIGH);
+    }
   }
 }
