@@ -1,224 +1,226 @@
-// ============================================================
-//  IEEE SoutheastCon 2026 — TIER 1 COMPLETE PROGRAM
-//  Board   : mBot Ultimate 2.0 (mCore2 / ATmega2560)
-//  Libs    : MeUltrasonicSensor, MeLineFollower, MeEncoderOnBoard
-//  Sensors : Line Follower Port 7, Ultrasonic Port 6
-//  NOTE    : No servo/gripper — flag is released mechanically
-//            (rubber band, gravity drop, or passive release)
-// ============================================================
+#include <LiquidCrystal.h>
 
-// ── LIBRARIES ───────────────────────────────────────────────
-#include <MeUltrasonicSensor.h>
-#include <MeLineFollower.h>
-#include <MeEncoderOnBoard.h>
-#include <Arduino.h>
+// LCD pins
+LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
 
-// ── HARDWARE ────────────────────────────────────────────────
-MeUltrasonicSensor ultrasonic(PORT_6);
-MeLineFollower     lineSensor(PORT_7);
-MeEncoderOnBoard   motorL(SLOT1);
-MeEncoderOnBoard   motorR(SLOT2);
+// Motor pins
+#define MOTOR_EN  3
+#define MOTOR_IN1 6
+#define MOTOR_IN2 13
 
-// ── TUNING CONSTANTS ────────────────────────────────────────
-#define LIGHT_THRESHOLD   800    // white LED bar detection value
-                                 // CALIBRATE: Serial Monitor → note room
-                                 // light reading, flash white LED above
-                                 // sensor, set between the two values
+// LED pins
+#define GREEN_LED 4
+#define RED_LED   5
 
-#define DRIVE_SPEED       200    // forward speed (-255 to 255)
-#define RETURN_SPEED      150    // slower speed for return journey
+// Encoder pin
+#define ENCODER_PIN 2
 
-#define FLAG_DRIVE_TIME   1700   // ms to drive ~20 inches (508mm)
-                                 // CALIBRATE: measure actual distance,
-                                 // adjust until robot travels 508mm
+// Water sensor pin
+#define WATER_SENSOR A0
 
-#define EXTRA_DRIVE_TIME  500    // ms extra forward after flag drop
-                                 // clears space before 180 turn
+// RPM calculation
+volatile int pulseCount = 0;
+float rpm = 0;
+float maxRPM = 0;
+float targetRPM = 0;
+unsigned long lastTime = 0;
+unsigned long rampStartTime = 0;
+bool waterFault = false;
 
-#define HOME_DISTANCE     10     // cm — stop when this close to start wall
-
-#define TURN_180_MS       1100   // ms to spin 180 degrees
-                                 // CALIBRATE: time a full 360 spin,
-                                 // use exactly half that value here
-
-// ── MOVEMENT HELPERS ────────────────────────────────────────
-
-void driveForward(int spd) {
-  motorL.setMotorPwm(spd);
-  motorR.setMotorPwm(-spd);    // mirrored mount — sign flipped
-                                // if robot spins → swap sign on motorR
+void countPulse() {
+  pulseCount++;
 }
 
-void driveBackward(int spd) {
-  motorL.setMotorPwm(-spd);
-  motorR.setMotorPwm(spd);
+void stopMotor() {
+  analogWrite(MOTOR_EN, 0);
+  digitalWrite(MOTOR_IN1, LOW);
+  digitalWrite(MOTOR_IN2, LOW);
 }
 
-void spinRight(int spd) {
-  motorL.setMotorPwm(spd);     // both same direction = pivot right
-  motorR.setMotorPwm(spd);
-}
-
-void stopMotors() {
-  motorL.setMotorPwm(0);
-  motorR.setMotorPwm(0);
-}
-
-// ── TASK FUNCTIONS ───────────────────────────────────────────
-
-// ----------------------------------------------------------
-// TASK 1: Wait for white LED start bar  (+15 pts)
-// ----------------------------------------------------------
-void waitForStart() {
-  Serial.println("STATUS: Waiting for LED start bar...");
-  bool started = false;
-
-  while (!started) {
-    int val = lineSensor.readSensors();
-    Serial.print("Light: "); Serial.println(val);
-
-    if (val > LIGHT_THRESHOLD) {
-      started = true;
-      Serial.println("STATUS: START DETECTED!");
-    }
-    delay(50);
-  }
-  delay(200);
-}
-
-// ----------------------------------------------------------
-// TASK 2: Leave starting area  (+10 pts)
-// ----------------------------------------------------------
-void leaveStartZone() {
-  Serial.println("STATUS: Leaving start zone...");
-  driveForward(DRIVE_SPEED);
-  delay(FLAG_DRIVE_TIME);
-  stopMotors();
-  Serial.println("STATUS: 20 inches reached.");
-  delay(300);
-}
-
-// ----------------------------------------------------------
-// TASK 3: Plant school flag  (+10 pts)
-// ----------------------------------------------------------
-// No servo — flag is passively released at this position.
-// Robot has already driven 20 inches out of start zone.
-// Flag drops/releases by whatever passive mechanism is used
-// (gravity tilt, rubber band trigger, wedge release etc).
-// If your release needs a digital pin trigger, add it here.
-void plantFlag() {
-  Serial.println("STATUS: Planting JSU flag...");
-
-  // ── ADD YOUR FLAG RELEASE MECHANISM HERE ──────────────
-  // Example — digital pin trigger (uncomment if needed):
-  // pinMode(A0, OUTPUT);
-  // digitalWrite(A0, HIGH);   // trigger release
-  // delay(300);
-  // digitalWrite(A0, LOW);
-  // ──────────────────────────────────────────────────────
-
-  // pause so flag has time to settle on the surface
-  delay(600);
-  Serial.println("STATUS: Flag planted.");
-}
-
-// ----------------------------------------------------------
-// TASK 4: Return to starting area  (+15 pts)
-// ----------------------------------------------------------
-void returnHome() {
-  Serial.println("STATUS: Returning home...");
-
-  // drive a little further so we don't reverse over the flag
-  driveForward(DRIVE_SPEED);
-  delay(EXTRA_DRIVE_TIME);
-  stopMotors();
-  delay(300);
-
-  // spin 180 degrees to face the start zone
-  Serial.println("STATUS: Turning 180...");
-  spinRight(DRIVE_SPEED);
-  delay(TURN_180_MS);
-  stopMotors();
-  delay(300);
-
-  // drive toward start wall until ultrasonic detects it
-  Serial.println("STATUS: Driving toward start wall...");
-  driveForward(RETURN_SPEED);
-
-  while (ultrasonic.distanceCm() > HOME_DISTANCE) {
-    Serial.print("Distance: "); Serial.print(ultrasonic.distanceCm());
-    Serial.println(" cm");
-    delay(50);
-  }
-
-  stopMotors();
-  Serial.println("STATUS: HOME — inside start zone!");
-}
-
-// ── SETUP ────────────────────────────────────────────────────
 void setup() {
   Serial.begin(9600);
-  Serial.println("STATUS: Initialising...");
 
-  motorL.begin();
-  motorR.begin();
-  delay(500);
+  // LCD setup
+  lcd.begin(16, 2);
+  lcd.setCursor(0, 0);
+  lcd.print("Firebird-1");
+  lcd.setCursor(0, 1);
+  lcd.print("System Ready");
+  delay(1000);
 
-  Serial.println("STATUS: Ready.");
+  // Motor pins
+  pinMode(MOTOR_EN,  OUTPUT);
+  pinMode(MOTOR_IN1, OUTPUT);
+  pinMode(MOTOR_IN2, OUTPUT);
+
+  // LED pins
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(RED_LED,   OUTPUT);
+
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(RED_LED,   LOW);
+
+  // Encoder
+  pinMode(ENCODER_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, RISING);
+
+  // Motor direction
+  digitalWrite(MOTOR_IN1, HIGH);
+  digitalWrite(MOTOR_IN2, LOW);
+
+  // CHECK WATER BEFORE STARTING
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Checking water..");
+  delay(1000);
+
+  int waterLevel = analogRead(WATER_SENSOR);
+  Serial.print("Water Level: ");
+  Serial.println(waterLevel);
+
+  if (waterLevel < 100) {
+    // NO WATER
+    waterFault = true;
+    digitalWrite(RED_LED, HIGH);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("FAULT: NO WATER!");
+    lcd.setCursor(0, 1);
+    lcd.print("Add water first!");
+    Serial.println("FAULT: No water!");
+    while (true) {
+      delay(1000);
+    }
+  } else {
+    // WATER OK
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Water: OK!");
+    lcd.setCursor(0, 1);
+    lcd.print("Proceeding...");
+    Serial.println("Water OK!");
+    delay(1000);
+  }
+
+  // 3 second countdown
+  for (int i = 3; i > 0; i--) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Launch in:");
+    lcd.setCursor(0, 1);
+    lcd.print(i);
+    lcd.print(" seconds...");
+    Serial.print("Countdown: ");
+    Serial.println(i);
+    delay(1000);
+  }
+
+  // Ramping up
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Ramping up...");
+  lcd.setCursor(0, 1);
+  lcd.print("Speed: 0");
+  Serial.println("Ramping up motor...");
+
+  // Slow ramp up over 2 seconds
+  for (int speed = 0; speed <= 255; speed += 5) {
+    analogWrite(MOTOR_EN, speed);
+
+    detachInterrupt(digitalPinToInterrupt(ENCODER_PIN));
+    float rampRPM = (pulseCount / 20.0) * 60.0;
+    pulseCount = 0;
+    attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, RISING);
+
+    lcd.setCursor(0, 1);
+    lcd.print("Speed:");
+    lcd.print(rampRPM);
+    lcd.print("    ");
+
+    if (rampRPM > maxRPM) maxRPM = rampRPM;
+    delay(40);
+  }
+
+  targetRPM = maxRPM * 0.75;
+  Serial.print("Max RPM: ");
+  Serial.println(maxRPM);
+  Serial.print("Target 75%: ");
+  Serial.println(targetRPM);
+
+  rampStartTime = millis();
+  lastTime = millis();
 }
 
-// ── MAIN RUN SEQUENCE ────────────────────────────────────────
 void loop() {
 
-  waitForStart();     // +15 pts
-  leaveStartZone();   // +10 pts
-  plantFlag();        // +10 pts
-  returnHome();       // +15 pts
+  // Check water every loop
+  int waterLevel = analogRead(WATER_SENSOR);
+  Serial.print("Water: ");
+  Serial.println(waterLevel);
 
-  Serial.println("==============================================");
-  Serial.println("MATCH COMPLETE");
-  Serial.println("  Auto-start      : 15 pts");
-  Serial.println("  Left start zone : 10 pts");
-  Serial.println("  Planted flag    : 10 pts");
-  Serial.println("  Returned home   : 15 pts");
-  Serial.println("  TOTAL           : 50 pts");
-  Serial.println("  + Design comp   : 15 pts");
-  Serial.println("  GRAND TOTAL     : 65 pts");
-  Serial.println("==============================================");
+  if (waterLevel < 100 && !waterFault) {
+    waterFault = true;
+    stopMotor();
+    digitalWrite(RED_LED, HIGH);
+    digitalWrite(GREEN_LED, LOW);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("FAULT: NO WATER!");
+    lcd.setCursor(0, 1);
+    lcd.print("Motor Stopped!");
+    Serial.println("FAULT: Water lost!");
+  }
 
-  while (true) { delay(1000); }
+  // If water fault stop everything
+  if (waterFault) return;
+
+  // RPM every second
+  if (millis() - lastTime >= 1000) {
+
+    detachInterrupt(digitalPinToInterrupt(ENCODER_PIN));
+    rpm = (pulseCount / 20.0) * 60.0;
+    pulseCount = 0;
+    lastTime = millis();
+
+    Serial.print("RPM: ");
+    Serial.println(rpm);
+
+    // Show water level and RPM on LCD
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("RPM:");
+    lcd.print(rpm);
+    lcd.print(" W:");
+    lcd.print(waterLevel);
+
+    unsigned long elapsed = millis() - rampStartTime;
+
+    if (rpm >= targetRPM && targetRPM > 0) {
+      digitalWrite(GREEN_LED, HIGH);
+      digitalWrite(RED_LED, LOW);
+      lcd.setCursor(0, 1);
+      lcd.print("Status: GOOD!");
+      Serial.println("Status: GOOD!");
+
+    } else if (elapsed <= 2000) {
+      lcd.setCursor(0, 1);
+      lcd.print("Checking...");
+
+    } else if (elapsed > 2000 && elapsed <= 7000) {
+      digitalWrite(RED_LED, HIGH);
+      digitalWrite(GREEN_LED, LOW);
+      lcd.setCursor(0, 1);
+      lcd.print("FAULT:Low Speed!");
+      Serial.println("FAULT: Low Speed!");
+
+    } else if (elapsed > 7000) {
+      digitalWrite(RED_LED, HIGH);
+      digitalWrite(GREEN_LED, LOW);
+      lcd.setCursor(0, 1);
+      lcd.print("MOTOR FAILED!");
+      Serial.println("MOTOR FAILED!");
+    }
+
+    attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, RISING);
+  }
 }
-
-// ============================================================
-//  CALIBRATION ORDER
-// ============================================================
-//
-//  1. LIGHT_THRESHOLD
-//     Serial Monitor → watch "Light:" under room light
-//     Flash white LED above sensor → note spike
-//     Set LIGHT_THRESHOLD between the two values
-//
-//  2. FLAG_DRIVE_TIME
-//     Tape measure on floor → run leaveStartZone() alone
-//     Target: 508mm (20 inches)
-//     Adjust FLAG_DRIVE_TIME until distance matches
-//
-//  3. TURN_180_MS
-//     Mark robot center on floor
-//     Run spinRight() for TURN_180_MS → measure angle
-//     Adjust until exactly 180 degrees
-//
-//  4. HOME_DISTANCE
-//     Run returnHome() alone → watch Serial Monitor
-//     Confirm robot stops cleanly inside 12 inch zone
-//
-//  5. Full dry run x3
-//
-// ============================================================
-//  LIBRARIES — Arduino IDE Library Manager
-//  Search "Makeblock" → install "Makeblock Electronics"
-//
-//  BOARD
-//  Tools → Board → Arduino Mega 2560
-//  Tools → Port → your COM port
-// ============================================================

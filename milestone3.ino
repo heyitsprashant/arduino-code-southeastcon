@@ -1,24 +1,15 @@
 #include <LiquidCrystal.h>
 
-// LCD pins
 LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
 
-// Motor pins
 #define MOTOR_EN  3
 #define MOTOR_IN1 6
 #define MOTOR_IN2 13
-
-// LED pins
 #define GREEN_LED 4
 #define RED_LED   5
-
-// Encoder pin
 #define ENCODER_PIN 2
-
-// Water sensor pin
 #define WATER_SENSOR A0
 
-// RPM calculation
 volatile int pulseCount = 0;
 float rpm = 0;
 float maxRPM = 0;
@@ -40,7 +31,6 @@ void stopMotor() {
 void setup() {
   Serial.begin(9600);
 
-  // LCD setup
   lcd.begin(16, 2);
   lcd.setCursor(0, 0);
   lcd.print("Firebird-1");
@@ -48,23 +38,18 @@ void setup() {
   lcd.print("System Ready");
   delay(1000);
 
-  // Motor pins
   pinMode(MOTOR_EN,  OUTPUT);
   pinMode(MOTOR_IN1, OUTPUT);
   pinMode(MOTOR_IN2, OUTPUT);
-
-  // LED pins
   pinMode(GREEN_LED, OUTPUT);
   pinMode(RED_LED,   OUTPUT);
 
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(RED_LED,   LOW);
 
-  // Encoder
   pinMode(ENCODER_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), countPulse, RISING);
 
-  // Motor direction
   digitalWrite(MOTOR_IN1, HIGH);
   digitalWrite(MOTOR_IN2, LOW);
 
@@ -79,7 +64,6 @@ void setup() {
   Serial.println(waterLevel);
 
   if (waterLevel < 100) {
-    // NO WATER
     waterFault = true;
     digitalWrite(RED_LED, HIGH);
     lcd.clear();
@@ -92,7 +76,6 @@ void setup() {
       delay(1000);
     }
   } else {
-    // WATER OK
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("Water: OK!");
@@ -115,7 +98,6 @@ void setup() {
     delay(1000);
   }
 
-  // Ramping up
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Ramping up...");
@@ -171,7 +153,6 @@ void loop() {
     Serial.println("FAULT: Water lost!");
   }
 
-  // If water fault stop everything
   if (waterFault) return;
 
   // RPM every second
@@ -185,7 +166,6 @@ void loop() {
     Serial.print("RPM: ");
     Serial.println(rpm);
 
-    // Show water level and RPM on LCD
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("RPM:");
